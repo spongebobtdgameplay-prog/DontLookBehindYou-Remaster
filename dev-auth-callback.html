@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex,nofollow">
+<title>Dev Auth</title>
+</head>
+<body>
+<script>
+(function(){
+  const Params=new URLSearchParams(location.search);
+  const RequestId=Params.get("requestId")||"";
+  const Success=Params.get("success")==="1";
+
+  if(window.parent&&window.parent!==window){
+    window.parent.postMessage({
+      type:"DLBY_DEV_PIN_RESULT",
+      requestId:RequestId,
+      success:Success
+    },"https://spongebobtdgameplay-prog.github.io");
+  }
+})();
+</script>
+</body>
+</html>
