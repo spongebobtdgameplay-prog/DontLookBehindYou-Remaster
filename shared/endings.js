@@ -14,8 +14,7 @@ function markEndingSeen(name){
   let Authorized=false;
   let PendingRequestId="";
   let ResponseTimer=null;
-  let PollTimer=null;
-  let ActiveCallbackName="";
+  let AuthWindow=null;
 
   const Style=document.createElement("style");
   Style.textContent=`
@@ -83,17 +82,15 @@ function markEndingSeen(name){
     PinStatus.className=Type||"";
   }
 
-  function ClearRequest(){
+  function ClearRequest(CloseWindow=true){
     clearTimeout(ResponseTimer);
-    clearInterval(PollTimer);
     ResponseTimer=null;
-    PollTimer=null;
     PendingRequestId="";
-    if(ActiveCallbackName){
-      try{ delete window[ActiveCallbackName]; }catch(Error){ window[ActiveCallbackName]=undefined; }
-      ActiveCallbackName="";
-    }
     PinSubmit.disabled=false;
+    if(CloseWindow&&AuthWindow&&!AuthWindow.closed){
+      try{ AuthWindow.close(); }catch(Error){}
+    }
+    AuthWindow=null;
   }
 
   function OpenPin(){
@@ -118,17 +115,7 @@ function markEndingSeen(name){
   }
 
   function FinishVerification(Success){
-    clearTimeout(ResponseTimer);
-    clearInterval(PollTimer);
-    ResponseTimer=null;
-    PollTimer=null;
-    PendingRequestId="";
-    PinSubmit.disabled=false;
-
-    if(ActiveCallbackName){
-      try{ delete window[ActiveCallbackName]; }catch(Error){ window[ActiveCallbackName]=undefined; }
-      ActiveCallbackName="";
-    }
+    ClearRequest();
 
     if(Success){
       Authorized=true;
@@ -143,24 +130,6 @@ function markEndingSeen(name){
     PinInput.value="";
     PinInput.focus();
     SetStatus("ACCESS DENIED.","error");
-  }
-
-  function PollResult(){
-    if(!PendingRequestId||!ActiveCallbackName) return;
-
-    const Script=document.createElement("script");
-    const Params=new URLSearchParams({
-      action:"result",
-      requestId:PendingRequestId,
-      callback:ActiveCallbackName,
-      time:String(Date.now())
-    });
-
-    Script.src=`${Endpoint}?${Params.toString()}`;
-    Script.async=true;
-    Script.onload=()=>Script.remove();
-    Script.onerror=()=>Script.remove();
-    document.head.appendChild(Script);
   }
 
   Cog.addEventListener("click",Event=>{
@@ -192,34 +161,56 @@ function markEndingSeen(name){
 
     ClearRequest();
     PendingRequestId=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    ActiveCallbackName=`DLBYDevPinResult_${Date.now()}_${Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_$]/g,"");
+    const TargetName=`DLBYDevAuth_${Date.now()}_${Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_]/g,"");
+
+    AuthWindow=window.open("about:blank",TargetName,"popup,width=420,height=220,left=200,top=200");
+    if(!AuthWindow){
+      PendingRequestId="";
+      SetStatus("ALLOW THE AUTH POPUP AND TRY AGAIN.","error");
+      return;
+    }
+
+    try{
+      AuthWindow.document.title="DON'T LOOK BEHIND YOU REMASTER";
+      AuthWindow.document.body.innerHTML="<div style='font-family:monospace;background:#080908;color:#d9e8c9;min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center'>VERIFYING DEV PIN...</div>";
+    }catch(Error){}
+
     PinSubmit.disabled=true;
     SetStatus("CHECKING SERVER...","");
 
-    window[ActiveCallbackName]=Data=>{
-      if(!Data||Data.requestId!==PendingRequestId||Data.ready!==true) return;
-      FinishVerification(Data.success===true);
-    };
+    const Form=document.createElement("form");
+    Form.method="POST";
+    Form.action=Endpoint;
+    Form.target=TargetName;
+    Form.style.display="none";
 
-    const Body=new URLSearchParams({
-      pin:Pin,
-      requestId:PendingRequestId
-    });
+    const PinField=document.createElement("input");
+    PinField.type="hidden";
+    PinField.name="pin";
+    PinField.value=Pin;
 
-    fetch(Endpoint,{
-      method:"POST",
-      mode:"no-cors",
-      cache:"no-store",
-      body:Body
-    }).catch(()=>{});
+    const RequestField=document.createElement("input");
+    RequestField.type="hidden";
+    RequestField.name="requestId";
+    RequestField.value=PendingRequestId;
 
-    setTimeout(PollResult,250);
-    PollTimer=setInterval(PollResult,600);
+    Form.append(PinField,RequestField);
+    document.body.appendChild(Form);
+    Form.submit();
+    Form.remove();
 
     ResponseTimer=setTimeout(()=>{
       ClearRequest();
       SetStatus("SERVER DID NOT RESPOND.","error");
-    },10000);
+    },12000);
+  });
+
+  window.addEventListener("message",Event=>{
+    if(Event.origin!=="https://script.googleusercontent.com"&&Event.origin!=="https://script.google.com") return;
+    const Data=Event.data;
+    if(!Data||Data.type!=="DLBY_DEV_PIN_RESULT") return;
+    if(!PendingRequestId||Data.requestId!==PendingRequestId) return;
+    FinishVerification(Data.success===true);
   });
 
   document.addEventListener("keydown",Event=>{
