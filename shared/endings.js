@@ -7,13 +7,16 @@ function markEndingSeen(name){
 
 (function(){
   const Endpoint="https://script.google.com/macros/s/AKfycby-dai5jJhtcfbA8SvuT1C4k2ecJfRlbREZQdMf-p9yo_d8-_rqscUR0aK_yCmVx1tV9Q/exec";
+  const ResultPrefix="dlby_dev_auth_result_";
   const Cog=document.getElementById("dev-tools-cog");
   const DevToolsPage=document.getElementById("dev-tools-page");
   if(!Cog||!DevToolsPage) return;
 
   let Authorized=false;
   let PendingRequestId="";
+  let PendingResultKey="";
   let ResponseTimer=null;
+  let ResultPollTimer=null;
   let AuthWindow=null;
 
   const Style=document.createElement("style");
@@ -30,8 +33,15 @@ function markEndingSeen(name){
     #dev-pin-header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
     #dev-pin-title{ color:#fff; font-size:1.1rem; letter-spacing:2px; }
     #dev-pin-close{
-      width:44px; height:44px; border:1px solid #555; background:#111; color:#fff;
-      font:inherit; font-size:1.2rem; cursor:pointer;
+      width:44px !important; height:44px !important;
+      min-width:44px !important; min-height:44px !important;
+      max-width:44px !important; max-height:44px !important;
+      padding:0 !important; margin:0 !important;
+      display:grid !important; place-items:center !important;
+      box-sizing:border-box !important;
+      border:1px solid #555; background:#111; color:#fff;
+      font:inherit; font-size:1.2rem; line-height:1 !important;
+      flex:0 0 44px !important; cursor:pointer;
     }
     #dev-pin-label{ display:block; margin-bottom:8px; color:#d9e8c9; font-size:.75rem; letter-spacing:1px; }
     #dev-pin-input{
@@ -83,16 +93,26 @@ function markEndingSeen(name){
   }
 
   function CloseAuthWindow(){
-    if(AuthWindow&&!AuthWindow.closed){
-      try{ AuthWindow.close(); }catch(Error){}
+    if(AuthWindow){
+      try{
+        if(!AuthWindow.closed) AuthWindow.close();
+      }catch(Error){}
     }
     AuthWindow=null;
   }
 
-  function ClearRequest(CloseWindow=true){
+  function ClearRequest(RemoveResult=true,CloseWindow=true){
     clearTimeout(ResponseTimer);
+    clearInterval(ResultPollTimer);
     ResponseTimer=null;
+    ResultPollTimer=null;
+
+    if(RemoveResult&&PendingResultKey){
+      try{ localStorage.removeItem(PendingResultKey); }catch(Error){}
+    }
+
     PendingRequestId="";
+    PendingResultKey="";
     PinSubmit.disabled=false;
     if(CloseWindow) CloseAuthWindow();
   }
@@ -136,6 +156,16 @@ function markEndingSeen(name){
     SetStatus("ACCESS DENIED.","error");
   }
 
+  function CheckResult(){
+    if(!PendingRequestId||!PendingResultKey) return;
+
+    let Result=null;
+    try{ Result=localStorage.getItem(PendingResultKey); }catch(Error){}
+    if(Result!=="1"&&Result!=="0") return;
+
+    FinishVerification(Result==="1");
+  }
+
   Cog.addEventListener("click",Event=>{
     if(Authorized) return;
     Event.preventDefault();
@@ -144,6 +174,7 @@ function markEndingSeen(name){
   },true);
 
   PinClose.addEventListener("click",Event=>{
+    Event.preventDefault();
     Event.stopPropagation();
     ClosePin();
   });
@@ -165,12 +196,15 @@ function markEndingSeen(name){
 
     ClearRequest();
     PendingRequestId=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    PendingResultKey=ResultPrefix+PendingRequestId;
+    try{ localStorage.removeItem(PendingResultKey); }catch(Error){}
 
     const TargetName=`DLBYDevAuth_${Date.now()}_${Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_]/g,"");
     AuthWindow=window.open("about:blank",TargetName,"popup,width=420,height=220,left=200,top=200");
 
     if(!AuthWindow){
       PendingRequestId="";
+      PendingResultKey="";
       SetStatus("POPUP BLOCKED. ALLOW POPUPS AND TRY AGAIN.","error");
       return;
     }
@@ -205,21 +239,18 @@ function markEndingSeen(name){
     Form.submit();
     Form.remove();
 
+    ResultPollTimer=setInterval(CheckResult,150);
     ResponseTimer=setTimeout(()=>{
+      CheckResult();
+      if(!PendingRequestId) return;
       ClearRequest();
       SetStatus("SERVER DID NOT RESPOND.","error");
-    },12000);
+    },15000);
   });
 
-  window.addEventListener("message",Event=>{
-    if(Event.origin!=="https://spongebobtdgameplay-prog.github.io") return;
-    if(!AuthWindow||Event.source!==AuthWindow) return;
-
-    const Data=Event.data;
-    if(!Data||Data.type!=="DLBY_DEV_PIN_RESULT") return;
-    if(!PendingRequestId||Data.requestId!==PendingRequestId) return;
-
-    FinishVerification(Data.success===true);
+  window.addEventListener("storage",Event=>{
+    if(!PendingResultKey||Event.key!==PendingResultKey) return;
+    CheckResult();
   });
 
   document.addEventListener("keydown",Event=>{
