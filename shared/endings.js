@@ -14,6 +14,8 @@ function markEndingSeen(name){
   let Authorized=false;
   let PendingRequestId="";
   let ResponseTimer=null;
+  let PollTimer=null;
+  let ActiveCallbackName="";
 
   const Style=document.createElement("style");
   Style.textContent=`
@@ -47,7 +49,6 @@ function markEndingSeen(name){
     #dev-pin-status{ min-height:18px; margin-top:12px; color:#777; font-size:.7rem; letter-spacing:.8px; }
     #dev-pin-status.error{ color:#c81e2b; }
     #dev-pin-status.ok{ color:#d9e8c9; }
-    #dev-pin-frame{ display:none; }
   `;
   document.head.appendChild(Style);
 
@@ -60,14 +61,12 @@ function markEndingSeen(name){
         <div id="dev-pin-title">DEV ACCESS</div>
         <button id="dev-pin-close" type="button" aria-label="Close PIN prompt">×</button>
       </div>
-      <form id="dev-pin-form" method="POST" action="${Endpoint}" target="dev-pin-frame" autocomplete="off">
+      <form id="dev-pin-form" autocomplete="off">
         <label id="dev-pin-label" for="dev-pin-input">ENTER SERVER PIN</label>
         <input id="dev-pin-input" name="pin" type="password" inputmode="numeric" autocomplete="off" required>
-        <input id="dev-pin-request" name="requestId" type="hidden">
         <button id="dev-pin-submit" type="submit">UNLOCK DEV TOOLS</button>
       </form>
       <div id="dev-pin-status" aria-live="polite"></div>
-      <iframe id="dev-pin-frame" name="dev-pin-frame" title="Developer PIN verification"></iframe>
     </div>
   `;
   document.body.appendChild(PinPage);
@@ -76,13 +75,25 @@ function markEndingSeen(name){
   const PinClose=document.getElementById("dev-pin-close");
   const PinForm=document.getElementById("dev-pin-form");
   const PinInput=document.getElementById("dev-pin-input");
-  const PinRequest=document.getElementById("dev-pin-request");
   const PinSubmit=document.getElementById("dev-pin-submit");
   const PinStatus=document.getElementById("dev-pin-status");
 
   function SetStatus(Text,Type){
     PinStatus.textContent=Text;
     PinStatus.className=Type||"";
+  }
+
+  function ClearRequest(){
+    clearTimeout(ResponseTimer);
+    clearInterval(PollTimer);
+    ResponseTimer=null;
+    PollTimer=null;
+    PendingRequestId="";
+    if(ActiveCallbackName){
+      try{ delete window[ActiveCallbackName]; }catch(Error){ window[ActiveCallbackName]=undefined; }
+      ActiveCallbackName="";
+    }
+    PinSubmit.disabled=false;
   }
 
   function OpenPin(){
@@ -95,10 +106,7 @@ function markEndingSeen(name){
   }
 
   function ClosePin(){
-    clearTimeout(ResponseTimer);
-    ResponseTimer=null;
-    PendingRequestId="";
-    PinSubmit.disabled=false;
+    ClearRequest();
     PinPage.classList.remove("open");
     PinPage.setAttribute("aria-hidden","true");
     SetStatus("","");
@@ -107,6 +115,52 @@ function markEndingSeen(name){
   function OpenUnlockedTools(){
     DevToolsPage.classList.add("open");
     DevToolsPage.setAttribute("aria-hidden","false");
+  }
+
+  function FinishVerification(Success){
+    clearTimeout(ResponseTimer);
+    clearInterval(PollTimer);
+    ResponseTimer=null;
+    PollTimer=null;
+    PendingRequestId="";
+    PinSubmit.disabled=false;
+
+    if(ActiveCallbackName){
+      try{ delete window[ActiveCallbackName]; }catch(Error){ window[ActiveCallbackName]=undefined; }
+      ActiveCallbackName="";
+    }
+
+    if(Success){
+      Authorized=true;
+      SetStatus("ACCESS GRANTED.","ok");
+      setTimeout(()=>{
+        ClosePin();
+        OpenUnlockedTools();
+      },180);
+      return;
+    }
+
+    PinInput.value="";
+    PinInput.focus();
+    SetStatus("ACCESS DENIED.","error");
+  }
+
+  function PollResult(){
+    if(!PendingRequestId||!ActiveCallbackName) return;
+
+    const Script=document.createElement("script");
+    const Params=new URLSearchParams({
+      action:"result",
+      requestId:PendingRequestId,
+      callback:ActiveCallbackName,
+      time:String(Date.now())
+    });
+
+    Script.src=`${Endpoint}?${Params.toString()}`;
+    Script.async=true;
+    Script.onload=()=>Script.remove();
+    Script.onerror=()=>Script.remove();
+    document.head.appendChild(Script);
   }
 
   Cog.addEventListener("click",Event=>{
@@ -127,51 +181,45 @@ function markEndingSeen(name){
 
   PinCard.addEventListener("click",Event=>Event.stopPropagation());
 
-  PinForm.addEventListener("submit",()=>{
+  PinForm.addEventListener("submit",Event=>{
+    Event.preventDefault();
+
     const Pin=PinInput.value.trim();
     if(!Pin){
       SetStatus("ENTER A PIN.","error");
-      return false;
-    }
-
-    PendingRequestId=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random()}`;
-    PinRequest.value=PendingRequestId;
-    PinSubmit.disabled=true;
-    SetStatus("CHECKING SERVER...","");
-
-    clearTimeout(ResponseTimer);
-    ResponseTimer=setTimeout(()=>{
-      PendingRequestId="";
-      PinSubmit.disabled=false;
-      SetStatus("SERVER DID NOT RESPOND.","error");
-    },10000);
-
-    return true;
-  });
-
-  window.addEventListener("message",Event=>{
-    const Data=Event.data;
-    if(!Data||Data.type!=="DLBY_DEV_PIN_RESULT") return;
-    if(!PendingRequestId||Data.requestId!==PendingRequestId) return;
-
-    clearTimeout(ResponseTimer);
-    ResponseTimer=null;
-    PendingRequestId="";
-    PinSubmit.disabled=false;
-
-    if(Data.success===true){
-      Authorized=true;
-      SetStatus("ACCESS GRANTED.","ok");
-      setTimeout(()=>{
-        ClosePin();
-        OpenUnlockedTools();
-      },180);
       return;
     }
 
-    PinInput.value="";
-    PinInput.focus();
-    SetStatus("ACCESS DENIED.","error");
+    ClearRequest();
+    PendingRequestId=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    ActiveCallbackName=`DLBYDevPinResult_${Date.now()}_${Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_$]/g,"");
+    PinSubmit.disabled=true;
+    SetStatus("CHECKING SERVER...","");
+
+    window[ActiveCallbackName]=Data=>{
+      if(!Data||Data.requestId!==PendingRequestId||Data.ready!==true) return;
+      FinishVerification(Data.success===true);
+    };
+
+    const Body=new URLSearchParams({
+      pin:Pin,
+      requestId:PendingRequestId
+    });
+
+    fetch(Endpoint,{
+      method:"POST",
+      mode:"no-cors",
+      cache:"no-store",
+      body:Body
+    }).catch(()=>{});
+
+    setTimeout(PollResult,250);
+    PollTimer=setInterval(PollResult,600);
+
+    ResponseTimer=setTimeout(()=>{
+      ClearRequest();
+      SetStatus("SERVER DID NOT RESPOND.","error");
+    },10000);
   });
 
   document.addEventListener("keydown",Event=>{
