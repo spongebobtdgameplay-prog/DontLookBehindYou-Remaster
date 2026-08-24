@@ -45,7 +45,7 @@
   #stamina-bar-fill.depleted{ background:var(--red); box-shadow:0 0 8px rgba(200,30,43,.6); }
 
   #flashlight-hint{
-    position:absolute; bottom:18px; right:18px;
+    position:absolute; bottom:18px; right:76px;
     font-family:var(--font-mono); font-size:.7rem; letter-spacing:1px;
     color:#555; border:1px solid #333; padding:5px 9px; background:rgba(0,0,0,.35);
   }
@@ -91,6 +91,44 @@
   #jumpscare-flash{
     position:fixed; inset:0; z-index:940; background:#000; opacity:0; pointer-events:none;
   }
+
+  #dev-tools-cog{
+    position:fixed; right:16px; bottom:14px; z-index:1002;
+    width:48px; height:48px; padding:0; border:0; background:transparent;
+    color:#fff; font-size:34px; line-height:48px; text-align:center;
+    cursor:pointer; font-family:Arial,sans-serif; text-shadow:0 0 8px #000,0 0 3px #000;
+  }
+  #dev-tools-cog:hover{ transform:rotate(25deg); }
+  #dev-tools-cog:focus-visible{ outline:2px solid #fff; outline-offset:2px; }
+  #dev-tools-page{
+    position:fixed; inset:0; z-index:1001; display:none;
+    align-items:center; justify-content:center; padding:22px;
+    background:rgba(0,0,0,.86); font-family:var(--font-mono);
+  }
+  #dev-tools-page.open{ display:flex; }
+  #dev-tools-card{
+    width:min(440px,100%); background:#080908; border:1px solid #d9e8c9;
+    box-shadow:0 0 32px rgba(217,232,201,.12); padding:22px;
+  }
+  #dev-tools-header{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:22px; }
+  #dev-tools-title{ color:#fff; font-size:1.25rem; letter-spacing:2px; }
+  #dev-tools-close{
+    min-width:44px; min-height:44px; border:1px solid #555; background:#111; color:#fff;
+    font:inherit; font-size:1.2rem; cursor:pointer;
+  }
+  .dev-tool-row{
+    display:flex; align-items:center; justify-content:space-between; gap:18px;
+    padding:14px 0; border-top:1px solid #242424;
+  }
+  .dev-tool-label{ color:#d9e8c9; font-size:.86rem; letter-spacing:1px; }
+  .dev-tool-sub{ margin-top:5px; color:#666; font-size:.68rem; line-height:1.4; }
+  #dev-bright-toggle{ width:22px; height:22px; accent-color:#fff; cursor:pointer; flex:0 0 auto; }
+  #dev-music-button{
+    width:100%; min-height:46px; margin-top:18px; border:1px solid #d9e8c9;
+    background:#111; color:#fff; font-family:var(--font-mono); font-size:.78rem;
+    letter-spacing:1px; cursor:pointer;
+  }
+  #dev-music-button:hover,#dev-tools-close:hover{ background:#1b1d1a; }
 </style>
 </head>
 <body>
@@ -131,9 +169,188 @@
   </div>
 </div>
 
+<button id="dev-tools-cog" type="button" aria-label="Open developer tools" title="Developer Tools">⚙</button>
+<div id="dev-tools-page" aria-hidden="true">
+  <div id="dev-tools-card" role="dialog" aria-modal="true" aria-labelledby="dev-tools-title">
+    <div id="dev-tools-header">
+      <div id="dev-tools-title">DEV TOOLS</div>
+      <button id="dev-tools-close" type="button" aria-label="Close developer tools">×</button>
+    </div>
+    <div class="dev-tool-row">
+      <div>
+        <div class="dev-tool-label">MAKE BRIGHT</div>
+        <div class="dev-tool-sub">Forces the hallway, rooms and fog into a bright debug view.</div>
+      </div>
+      <input id="dev-bright-toggle" type="checkbox" aria-label="Make Bright">
+    </div>
+    <button id="dev-music-button" type="button">STOP CREEPY MUSIC</button>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="shared/audio.js"></script>
 <script src="shared/endings.js"></script>
 <script src="game.js"></script>
+<script>
+(function(){
+  const Cog=document.getElementById("dev-tools-cog");
+  const Page=document.getElementById("dev-tools-page");
+  const Close=document.getElementById("dev-tools-close");
+  const BrightToggle=document.getElementById("dev-bright-toggle");
+  const MusicButton=document.getElementById("dev-music-button");
+  const FogNear=scene.fog?scene.fog.near:0;
+  const FogFar=scene.fog?scene.fog.far:0;
+  let BrightEnabled=false;
+  let BrightTimer=null;
+  let CreepyMusicDisabled=false;
+  let MusicMode="creepy";
+  let CoolContext=null;
+  let CoolTimer=null;
+  let CoolStep=0;
+  let CoolNodes=[];
+  const OriginalStartDrone=SFX.startDrone.bind(SFX);
+
+  function OpenDevTools(Event){
+    Event?.stopPropagation();
+    if(document.pointerLockElement) document.exitPointerLock();
+    Page.classList.add("open");
+    Page.setAttribute("aria-hidden","false");
+  }
+
+  function CloseDevTools(Event){
+    Event?.stopPropagation();
+    Page.classList.remove("open");
+    Page.setAttribute("aria-hidden","true");
+  }
+
+  function ForceBright(){
+    ambient.intensity=1.55;
+    if(scene.fog){
+      scene.fog.near=80;
+      scene.fog.far=120;
+    }
+    ceilingLights.forEach(Item=>{
+      Item.light.intensity=Math.max(Item.baseIntensity*2.5,1.4);
+      if(Item.diffuser) Item.diffuser.material.emissiveIntensity=1.2;
+    });
+  }
+
+  function RestoreLighting(){
+    if(scene.fog){
+      scene.fog.near=FogNear;
+      scene.fog.far=FogFar;
+    }
+    ambient.intensity=lightsOn?0.16:0.02;
+    ceilingLights.forEach(Item=>{
+      Item.light.intensity=lightsOn?Item.baseIntensity:0;
+      if(Item.diffuser) Item.diffuser.material.emissiveIntensity=lightsOn?0.6:0.02;
+    });
+  }
+
+  function SetBright(Enabled){
+    BrightEnabled=Enabled;
+    clearInterval(BrightTimer);
+    BrightTimer=null;
+    if(BrightEnabled){
+      ForceBright();
+      BrightTimer=setInterval(ForceBright,50);
+    }else{
+      RestoreLighting();
+    }
+  }
+
+  function EnsureCoolContext(){
+    if(!CoolContext) CoolContext=new (window.AudioContext||window.webkitAudioContext)();
+    if(CoolContext.state==="suspended") CoolContext.resume();
+    return CoolContext;
+  }
+
+  function PlayCoolNote(Frequency,Duration,Volume,Delay){
+    const Context=EnsureCoolContext();
+    const Oscillator=Context.createOscillator();
+    const Gain=Context.createGain();
+    const Start=Context.currentTime+(Delay||0);
+    Oscillator.type="triangle";
+    Oscillator.frequency.setValueAtTime(Frequency,Start);
+    Gain.gain.setValueAtTime(0.0001,Start);
+    Gain.gain.exponentialRampToValueAtTime(Volume,Start+0.025);
+    Gain.gain.exponentialRampToValueAtTime(0.0001,Start+Duration);
+    Oscillator.connect(Gain);
+    Gain.connect(Context.destination);
+    Oscillator.start(Start);
+    Oscillator.stop(Start+Duration+0.03);
+    CoolNodes.push(Oscillator);
+    Oscillator.addEventListener("ended",()=>{
+      const Index=CoolNodes.indexOf(Oscillator);
+      if(Index!==-1) CoolNodes.splice(Index,1);
+    });
+  }
+
+  function CoolBeat(){
+    const Bass=[110,110,130.81,98,110,146.83,130.81,98];
+    const Lead=[440,523.25,659.25,523.25,493.88,587.33,659.25,783.99];
+    const Index=CoolStep%Bass.length;
+    PlayCoolNote(Bass[Index],0.34,0.045,0);
+    PlayCoolNote(Lead[Index],0.18,0.028,0.04);
+    if(Index%2===0) PlayCoolNote(Lead[(Index+2)%Lead.length]/2,0.22,0.018,0.12);
+    CoolStep++;
+  }
+
+  function StartCoolMusic(){
+    if(CoolTimer) return;
+    EnsureCoolContext();
+    CoolStep=0;
+    CoolBeat();
+    CoolTimer=setInterval(CoolBeat,330);
+  }
+
+  function StopCoolMusic(){
+    clearInterval(CoolTimer);
+    CoolTimer=null;
+    CoolNodes.forEach(Node=>{ try{ Node.stop(); }catch(Error){} });
+    CoolNodes=[];
+  }
+
+  function DisableCreepyMusic(){
+    CreepyMusicDisabled=true;
+    SFX.stopDrone();
+    SFX.startDrone=function(){
+      if(!CreepyMusicDisabled) OriginalStartDrone();
+    };
+  }
+
+  Cog.addEventListener("click",OpenDevTools);
+  Close.addEventListener("click",CloseDevTools);
+  Page.addEventListener("click",Event=>{
+    if(Event.target===Page) CloseDevTools(Event);
+    else Event.stopPropagation();
+  });
+  BrightToggle.addEventListener("change",()=>SetBright(BrightToggle.checked));
+  MusicButton.addEventListener("click",()=>{
+    if(MusicMode==="creepy"){
+      DisableCreepyMusic();
+      StartCoolMusic();
+      MusicMode="cool";
+      MusicButton.textContent="STOP COOL MUSIC";
+      return;
+    }
+    if(MusicMode==="cool"){
+      StopCoolMusic();
+      MusicMode="silent";
+      MusicButton.textContent="START COOL MUSIC";
+      return;
+    }
+    StartCoolMusic();
+    MusicMode="cool";
+    MusicButton.textContent="STOP COOL MUSIC";
+  });
+  document.addEventListener("keydown",Event=>{
+    if(Event.key==="Escape"&&Page.classList.contains("open")){
+      Event.preventDefault();
+      CloseDevTools(Event);
+    }
+  });
+})();
+</script>
 </body>
 </html>
