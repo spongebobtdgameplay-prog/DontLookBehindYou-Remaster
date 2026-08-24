@@ -14,6 +14,7 @@ function markEndingSeen(name){
   let Authorized=false;
   let PendingRequestId="";
   let ResponseTimer=null;
+  let AuthWindow=null;
 
   const Style=document.createElement("style");
   Style.textContent=`
@@ -47,10 +48,6 @@ function markEndingSeen(name){
     #dev-pin-status{ min-height:18px; margin-top:12px; color:#777; font-size:.7rem; letter-spacing:.8px; }
     #dev-pin-status.error{ color:#c81e2b; }
     #dev-pin-status.ok{ color:#d9e8c9; }
-    #dev-pin-auth-frame{
-      position:fixed; left:-10000px; top:-10000px; width:1px; height:1px;
-      border:0; opacity:0; pointer-events:none;
-    }
   `;
   document.head.appendChild(Style);
 
@@ -73,13 +70,6 @@ function markEndingSeen(name){
   `;
   document.body.appendChild(PinPage);
 
-  const AuthFrame=document.createElement("iframe");
-  AuthFrame.id="dev-pin-auth-frame";
-  AuthFrame.name="DLBYDevAuthFrame";
-  AuthFrame.setAttribute("aria-hidden","true");
-  AuthFrame.tabIndex=-1;
-  document.body.appendChild(AuthFrame);
-
   const PinCard=document.getElementById("dev-pin-card");
   const PinClose=document.getElementById("dev-pin-close");
   const PinForm=document.getElementById("dev-pin-form");
@@ -92,11 +82,19 @@ function markEndingSeen(name){
     PinStatus.className=Type||"";
   }
 
-  function ClearRequest(){
+  function CloseAuthWindow(){
+    if(AuthWindow&&!AuthWindow.closed){
+      try{ AuthWindow.close(); }catch(Error){}
+    }
+    AuthWindow=null;
+  }
+
+  function ClearRequest(CloseWindow=true){
     clearTimeout(ResponseTimer);
     ResponseTimer=null;
     PendingRequestId="";
     PinSubmit.disabled=false;
+    if(CloseWindow) CloseAuthWindow();
   }
 
   function OpenPin(){
@@ -167,13 +165,29 @@ function markEndingSeen(name){
 
     ClearRequest();
     PendingRequestId=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const TargetName=`DLBYDevAuth_${Date.now()}_${Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_]/g,"");
+    AuthWindow=window.open("about:blank",TargetName,"popup,width=420,height=220,left=200,top=200");
+
+    if(!AuthWindow){
+      PendingRequestId="";
+      SetStatus("POPUP BLOCKED. ALLOW POPUPS AND TRY AGAIN.","error");
+      return;
+    }
+
+    try{
+      AuthWindow.document.title="VERIFYING DEV PIN";
+      AuthWindow.document.body.style.cssText="margin:0;background:#080908;color:#d9e8c9;font-family:monospace;display:flex;align-items:center;justify-content:center;min-height:100vh";
+      AuthWindow.document.body.textContent="VERIFYING DEV PIN...";
+    }catch(Error){}
+
     PinSubmit.disabled=true;
     SetStatus("CHECKING SERVER...","");
 
     const Form=document.createElement("form");
     Form.method="POST";
     Form.action=Endpoint;
-    Form.target=AuthFrame.name;
+    Form.target=TargetName;
     Form.style.display="none";
 
     const PinField=document.createElement("input");
@@ -199,7 +213,7 @@ function markEndingSeen(name){
 
   window.addEventListener("message",Event=>{
     if(Event.origin!=="https://spongebobtdgameplay-prog.github.io") return;
-    if(Event.source!==AuthFrame.contentWindow) return;
+    if(!AuthWindow||Event.source!==AuthWindow) return;
 
     const Data=Event.data;
     if(!Data||Data.type!=="DLBY_DEV_PIN_RESULT") return;
