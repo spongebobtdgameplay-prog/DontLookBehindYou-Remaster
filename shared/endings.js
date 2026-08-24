@@ -199,6 +199,8 @@ function markEndingSeen(name){
     Form.submit();
     Form.remove();
 
+    try{ window.focus(); }catch(Error){}
+
     ResponseTimer=setTimeout(()=>{
       ClearRequest();
       SetStatus("SERVER DID NOT RESPOND.","error");
@@ -206,10 +208,19 @@ function markEndingSeen(name){
   });
 
   window.addEventListener("message",Event=>{
-    if(Event.origin!=="https://script.googleusercontent.com"&&Event.origin!=="https://script.google.com") return;
+    const Origin=String(Event.origin||"");
+    const IsGoogleOrigin=
+      Origin==="null" ||
+      Origin==="https://script.google.com" ||
+      Origin==="https://script.googleusercontent.com" ||
+      /^https:\/\/[a-z0-9.-]+\.googleusercontent\.com$/i.test(Origin);
+
+    if(!IsGoogleOrigin) return;
+
     const Data=Event.data;
     if(!Data||Data.type!=="DLBY_DEV_PIN_RESULT") return;
     if(!PendingRequestId||Data.requestId!==PendingRequestId) return;
+
     FinishVerification(Data.success===true);
   });
 
