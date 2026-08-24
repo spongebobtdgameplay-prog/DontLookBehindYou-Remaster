@@ -17,6 +17,7 @@ function markEndingSeen(name){
   let ResponseTimer=null;
   let PollTimer=null;
   let PollScript=null;
+  let PollLoadTimer=null;
 
   const Style=document.createElement("style");
   Style.textContent=`
@@ -92,7 +93,11 @@ function markEndingSeen(name){
   }
 
   function RemovePollScript(){
+    clearTimeout(PollLoadTimer);
+    PollLoadTimer=null;
     if(PollScript){
+      PollScript.onload=null;
+      PollScript.onerror=null;
       PollScript.remove();
       PollScript=null;
     }
@@ -158,9 +163,35 @@ function markEndingSeen(name){
       "&requestId="+encodeURIComponent(PendingRequestId)+
       "&t="+Date.now();
 
-    PollScript.onload=()=>RemovePollScript();
-    PollScript.onerror=()=>RemovePollScript();
+    PollScript.onload=RemovePollScript;
+    PollScript.onerror=RemovePollScript;
+    PollLoadTimer=setTimeout(RemovePollScript,3000);
     document.head.appendChild(PollScript);
+  }
+
+  function SendVerification(Pin,RequestId){
+    const Body=new URLSearchParams();
+    Body.set("pin",Pin);
+    Body.set("requestId",RequestId);
+
+    let Sent=false;
+    if(typeof navigator.sendBeacon==="function"){
+      try{
+        Sent=navigator.sendBeacon(Endpoint,Body);
+      }catch(Error){
+        Sent=false;
+      }
+    }
+
+    if(!Sent){
+      fetch(Endpoint,{
+        method:"POST",
+        mode:"no-cors",
+        cache:"no-store",
+        keepalive:true,
+        body:Body
+      }).catch(()=>{});
+    }
   }
 
   window.DLBYReceiveDevPin=function(Data){
@@ -203,24 +234,15 @@ function markEndingSeen(name){
     PinSubmit.disabled=true;
     SetStatus("CHECKING SERVER...","");
 
-    const Body=new URLSearchParams();
-    Body.set("pin",Pin);
-    Body.set("requestId",PendingRequestId);
+    SendVerification(Pin,PendingRequestId);
 
-    fetch(Endpoint,{
-      method:"POST",
-      mode:"no-cors",
-      cache:"no-store",
-      body:Body
-    }).catch(()=>{});
-
-    setTimeout(PollServer,250);
-    PollTimer=setInterval(PollServer,500);
+    setTimeout(PollServer,500);
+    PollTimer=setInterval(PollServer,750);
     ResponseTimer=setTimeout(()=>{
       if(!PendingRequestId) return;
       ClearRequest();
       SetStatus("SERVER DID NOT RESPOND.","error");
-    },12000);
+    },25000);
   });
 
   document.addEventListener("keydown",Event=>{
