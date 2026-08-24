@@ -6,7 +6,8 @@ function markEndingSeen(name){
 }
 
 (function(){
-  const Endpoint="https://script.google.com/macros/s/AKfycby-dai5jJhtcfbA8SvuT1C4k2ecJfRlbREZQdMf-p9yo_d8-_rqscUR0aK_yCmVx1tV9Q/exec";
+  const DeploymentKey="AKfycby-dai5jJhtcfbA8SvuT1C4k2ecJfRlbREZQdMf-p9yo_d8-_rqscUR0aK_yCmVx1tV9Q";
+  const Endpoint=`https://script.google.com/macros/s/${DeploymentKey}/exec`;
   const Cog=document.getElementById("dev-tools-cog");
   const DevToolsPage=document.getElementById("dev-tools-page");
   if(!Cog||!DevToolsPage) return;
