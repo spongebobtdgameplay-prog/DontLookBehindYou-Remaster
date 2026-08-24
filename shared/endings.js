@@ -7,17 +7,15 @@ function markEndingSeen(name){
 
 (function(){
   const Endpoint="https://script.google.com/macros/s/AKfycby-dai5jJhtcfbA8SvuT1C4k2ecJfRlbREZQdMf-p9yo_d8-_rqscUR0aK_yCmVx1tV9Q/exec";
-  const ResultPrefix="dlby_dev_auth_result_";
   const Cog=document.getElementById("dev-tools-cog");
   const DevToolsPage=document.getElementById("dev-tools-page");
   if(!Cog||!DevToolsPage) return;
 
   let Authorized=false;
   let PendingRequestId="";
-  let PendingResultKey="";
   let ResponseTimer=null;
-  let ResultPollTimer=null;
-  let AuthWindow=null;
+  let PollTimer=null;
+  let PollScript=null;
 
   const Style=document.createElement("style");
   Style.textContent=`
@@ -92,29 +90,21 @@ function markEndingSeen(name){
     PinStatus.className=Type||"";
   }
 
-  function CloseAuthWindow(){
-    if(AuthWindow){
-      try{
-        if(!AuthWindow.closed) AuthWindow.close();
-      }catch(Error){}
+  function RemovePollScript(){
+    if(PollScript){
+      PollScript.remove();
+      PollScript=null;
     }
-    AuthWindow=null;
   }
 
-  function ClearRequest(RemoveResult=true,CloseWindow=true){
+  function ClearRequest(){
     clearTimeout(ResponseTimer);
-    clearInterval(ResultPollTimer);
+    clearInterval(PollTimer);
     ResponseTimer=null;
-    ResultPollTimer=null;
-
-    if(RemoveResult&&PendingResultKey){
-      try{ localStorage.removeItem(PendingResultKey); }catch(Error){}
-    }
-
+    PollTimer=null;
+    RemovePollScript();
     PendingRequestId="";
-    PendingResultKey="";
     PinSubmit.disabled=false;
-    if(CloseWindow) CloseAuthWindow();
   }
 
   function OpenPin(){
@@ -156,15 +146,28 @@ function markEndingSeen(name){
     SetStatus("ACCESS DENIED.","error");
   }
 
-  function CheckResult(){
-    if(!PendingRequestId||!PendingResultKey) return;
+  function PollServer(){
+    if(!PendingRequestId||PollScript) return;
 
-    let Result=null;
-    try{ Result=localStorage.getItem(PendingResultKey); }catch(Error){}
-    if(Result!=="1"&&Result!=="0") return;
+    PollScript=document.createElement("script");
+    PollScript.async=true;
+    PollScript.src=
+      Endpoint+
+      "?action=result"+
+      "&requestId="+encodeURIComponent(PendingRequestId)+
+      "&t="+Date.now();
 
-    FinishVerification(Result==="1");
+    PollScript.onload=()=>RemovePollScript();
+    PollScript.onerror=()=>RemovePollScript();
+    document.head.appendChild(PollScript);
   }
+
+  window.DLBYReceiveDevPin=function(Data){
+    if(!Data||!PendingRequestId) return;
+    if(Data.requestId!==PendingRequestId) return;
+    if(Data.ready!==true) return;
+    FinishVerification(Data.success===true);
+  };
 
   Cog.addEventListener("click",Event=>{
     if(Authorized) return;
@@ -196,61 +199,27 @@ function markEndingSeen(name){
 
     ClearRequest();
     PendingRequestId=crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    PendingResultKey=ResultPrefix+PendingRequestId;
-    try{ localStorage.removeItem(PendingResultKey); }catch(Error){}
-
-    const TargetName=`DLBYDevAuth_${Date.now()}_${Math.random().toString(36).slice(2)}`.replace(/[^A-Za-z0-9_]/g,"");
-    AuthWindow=window.open("about:blank",TargetName,"popup,width=420,height=220,left=200,top=200");
-
-    if(!AuthWindow){
-      PendingRequestId="";
-      PendingResultKey="";
-      SetStatus("POPUP BLOCKED. ALLOW POPUPS AND TRY AGAIN.","error");
-      return;
-    }
-
-    try{
-      AuthWindow.document.title="VERIFYING DEV PIN";
-      AuthWindow.document.body.style.cssText="margin:0;background:#080908;color:#d9e8c9;font-family:monospace;display:flex;align-items:center;justify-content:center;min-height:100vh";
-      AuthWindow.document.body.textContent="VERIFYING DEV PIN...";
-    }catch(Error){}
-
     PinSubmit.disabled=true;
     SetStatus("CHECKING SERVER...","");
 
-    const Form=document.createElement("form");
-    Form.method="POST";
-    Form.action=Endpoint;
-    Form.target=TargetName;
-    Form.style.display="none";
+    const Body=new URLSearchParams();
+    Body.set("pin",Pin);
+    Body.set("requestId",PendingRequestId);
 
-    const PinField=document.createElement("input");
-    PinField.type="hidden";
-    PinField.name="pin";
-    PinField.value=Pin;
+    fetch(Endpoint,{
+      method:"POST",
+      mode:"no-cors",
+      cache:"no-store",
+      body:Body
+    }).catch(()=>{});
 
-    const RequestField=document.createElement("input");
-    RequestField.type="hidden";
-    RequestField.name="requestId";
-    RequestField.value=PendingRequestId;
-
-    Form.append(PinField,RequestField);
-    document.body.appendChild(Form);
-    Form.submit();
-    Form.remove();
-
-    ResultPollTimer=setInterval(CheckResult,150);
+    setTimeout(PollServer,250);
+    PollTimer=setInterval(PollServer,500);
     ResponseTimer=setTimeout(()=>{
-      CheckResult();
       if(!PendingRequestId) return;
       ClearRequest();
       SetStatus("SERVER DID NOT RESPOND.","error");
-    },15000);
-  });
-
-  window.addEventListener("storage",Event=>{
-    if(!PendingResultKey||Event.key!==PendingResultKey) return;
-    CheckResult();
+    },12000);
   });
 
   document.addEventListener("keydown",Event=>{
