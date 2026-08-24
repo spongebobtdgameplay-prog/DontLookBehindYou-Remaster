@@ -198,14 +198,8 @@ function markEndingSeen(name){
   });
 
   window.addEventListener("message",Event=>{
-    const Origin=String(Event.origin||"");
-    const IsGoogleOrigin=
-      Origin==="null" ||
-      Origin==="https://script.google.com" ||
-      Origin==="https://script.googleusercontent.com" ||
-      /^https:\/\/[a-z0-9.-]+\.googleusercontent\.com$/i.test(Origin);
-
-    if(!IsGoogleOrigin) return;
+    if(Event.origin!=="https://spongebobtdgameplay-prog.github.io") return;
+    if(Event.source!==AuthFrame.contentWindow) return;
 
     const Data=Event.data;
     if(!Data||Data.type!=="DLBY_DEV_PIN_RESULT") return;
