@@ -27,9 +27,19 @@ function SendFile(FilePath, Response) {
     }
 
     const Extension = path.extname(FilePath).toLowerCase();
+    const RelativePath = path.relative(Root, FilePath).replaceAll("\\", "/");
+    const IsFavicon = RelativePath === "favicon_io/favicon.ico"
+      || RelativePath.startsWith("favicon_io/")
+      || RelativePath === "favicon.ico";
+
     Response.writeHead(200, {
       "Content-Type": MimeTypes[Extension] || "application/octet-stream",
-      "Cache-Control": Extension === ".html" ? "no-cache" : "public, max-age=3600"
+      "Cache-Control": IsFavicon
+        ? "no-store, no-cache, must-revalidate, max-age=0"
+        : Extension === ".html"
+          ? "no-cache"
+          : "public, max-age=3600",
+      ...(IsFavicon ? { "Pragma": "no-cache", "Expires": "0" } : {})
     });
 
     fs.createReadStream(FilePath).pipe(Response);
