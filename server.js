@@ -28,7 +28,7 @@ function SendFile(FilePath, Response) {
 
     const Extension = path.extname(FilePath).toLowerCase();
     const RelativePath = path.relative(Root, FilePath).replaceAll("\\", "/");
-    const IsFavicon = RelativePath === "favicon_io/favicon.ico"
+    const IsFavicon = RelativePath === "favicon_io/favicon-v20260829.ico"
       || RelativePath.startsWith("favicon_io/")
       || RelativePath === "favicon.ico";
 
@@ -58,7 +58,7 @@ const Server = http.createServer((Request, Response) => {
   }
 
   if (Pathname === "/") Pathname = "/index.html";
-  if (Pathname === "/favicon.ico") Pathname = "/favicon_io/favicon.ico";
+  if (Pathname === "/favicon.ico") Pathname = "/favicon_io/favicon-v20260829.ico";
 
   const FilePath = path.resolve(Root, `.${Pathname}`);
   const RootPrefix = Root.endsWith(path.sep) ? Root : Root + path.sep;
